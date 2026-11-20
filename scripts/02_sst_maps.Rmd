@@ -1,0 +1,174 @@
+---
+title: "02 Mean SST maps, southern Benguela"
+subtitle: "GFDL-ESM4 and IPSL-CM6A-LR gridded output clipped to Atlantis model domain"
+author: "Kelly"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_knit$set(root.dir = normalizePath(".."))
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE,
+                      fig.width = 10, fig.height = 5, dpi = 300)
+```
+
+## Overview
+
+This notebook plots mean sea surface temperature from the GFDL and IPSL historical simulations, interpolated to a finer grid and clipped to the southern Benguela Atlantis model domain.
+
+## Load libraries
+
+```{r libraries}
+library(ncdf4)
+library(sf)
+library(ggplot2)
+library(dplyr)
+library(rnaturalearth)
+library(rnaturalearthdata)
+library(akima)
+library(ggpubr)
+```
+
+## User settings
+
+The netCDF files are not part of the repository (ISIMIP3b inputs, cited).
+
+```{r settings}
+# Path to the original gridded ESM netCDF
+gfdl_path <- "~/Documents/abacus/Hydro/CMIP6/InputData/gfdl/hist/gfdl-esm4_r1i1p1f1_historical_thetao_60arcmin_cropped_monthly_1850_2014.nc"
+ipsl_path <- "~/Documents/abacus/Hydro/CMIP6/InputData/ipsl/hist/ipsl-cm6a-lr_r1i1p1f1_historical_thetao_60arcmin_cropped_monthly_1850_2014.nc"
+outpath <- "outputs/figures/"
+
+# Path to the Atlantis domain shapefile (individual polygons)
+shp_polygons <- "~/Documents/abacus/abacus_shapefile/boundary/model_region_boundary.shp"
+
+#Years to average over (adjust to your baseline period)
+year_start <- 1990
+year_end   <- 2009  
+
+# Surface layer index (lev = 1 is the shallowest, 0-2 m)
+surface_lev <- 1
+
+# Read model domain boundary
+domain_sf <- st_read(shp_polygons, quiet = TRUE)
+```
+
+## Read, average, interpolate and clip netCDF (same steps for both ESMs)
+
+```{r sst-function}
+sst_domain <- function(nc_path) {
+  nc <- nc_open(path.expand(nc_path))
+
+  lon  <- ncvar_get(nc, "lon")
+  lat  <- ncvar_get(nc, "lat")
+  time <- ncvar_get(nc, "time")
+
+  # Time is in "months since 1601-1-1", calendar 365_day
+  # Convert to approximate years
+  time_years  <- 1601 + (time - 1) / 12
+
+  # Subset to desired year range
+  idx_time <- which(time_years >= year_start & time_years <= year_end)
+  cat(basename(nc_path), ": selected", length(idx_time), "months from", year_start, "to", year_end, "\n")
+
+  # Read surface temperature for selected time period
+  # thetao dimensions in file: (time, lev, lat, lon)
+  # ncvar_get reads as (lon, lat, lev, time) in R due to dimension reversal
+  thetao <- ncvar_get(nc, "thetao",
+                      start = c(1, 1, surface_lev, idx_time[1]),
+                      count = c(length(lon), length(lat), 1, length(idx_time)))
+  nc_close(nc)
+
+  # Replace fill values with NA before averaging
+  thetao[thetao > 1e19] <- NA
+
+  # Average over time (lon, lat, time) -> (lon, lat), remove cells with no data (land and coastal gaps)
+  sst_df <- expand.grid(lon = lon, lat = lat) |>
+    mutate(sst = as.vector(apply(thetao, c(1, 2), mean, na.rm = TRUE))) |>
+    filter(!is.na(sst))
+
+  # Spline interpolation from 1 deg to ~0.1 deg. Switch linear = TRUE if you get edge artefacts
+  interp_out <- akima::interp(x = sst_df$lon, y = sst_df$lat, z = sst_df$sst,
+                              xo = seq(min(lon), max(lon), by = 0.1),
+                              yo = seq(min(lat), max(lat), by = 0.1),
+                              linear = FALSE, extrap = FALSE)
+
+  sst_interp <- expand.grid(lon = interp_out$x, lat = interp_out$y) |>
+    mutate(sst = as.vector(interp_out$z)) |>
+    filter(!is.na(sst))
+
+  # Clip to model domain
+  st_as_sf(sst_interp, coords = c("lon", "lat"), crs = 4326) |>
+    st_intersection(domain_sf) |>
+    mutate(
+      #st_coordinates(.) extracts the coordinate matrix from the spatial object.[, 1] takes the first column (longitude)
+      lon = st_coordinates(.)[, 1],
+      lat = st_coordinates(.)[, 2]) |>
+    st_drop_geometry()
+}
+
+sst_gfdl <- sst_domain(gfdl_path)
+sst_ipsl <- sst_domain(ipsl_path)
+```
+
+## Plot
+
+Colour-blind friendly RdYlBu palette (blue = cool, red = warm).
+
+```{r plot}
+coast <- ne_countries(scale = "medium", returnclass = "sf")
+
+cb_warm_cool <- c("#313695", "#4575b4", "#74add1", "#abd9e9", "#e0f3f8",
+                  "#fee090", "#fdae61", "#f46d43", "#d73027", "#a50026")
+
+#extracts the bounding box of your model domain shapefile
+bbox <- st_bbox(domain_sf)
+
+# Create a mask: large bounding box minus the domain
+mask_box <- st_bbox(c(xmin = 0, ymin = -50, xmax = 40, ymax = -20), crs = 4326) |>
+  st_as_sfc()
+mask <- st_difference(mask_box, domain_sf)
+
+plot_sst <- function(sst_plot, esm, tag) {
+  ggplot() +
+    geom_tile(data = sst_plot, aes(x = lon, y = lat, fill = sst),
+              width = 0.1, height = 0.1) +
+    # Mask everything outside domain
+    geom_sf(data = mask, fill = "white", colour = NA) +
+    geom_sf(data = domain_sf, fill = NA, colour = "black", linewidth = 0.5) +
+    geom_sf(data = coast, fill = "grey80", colour = "grey40", linewidth = 0.3) +
+    scale_fill_gradientn(colours = cb_warm_cool,
+      limits = c(16, 24),
+      name = expression("SST (" * degree * "C)"),
+      na.value = "transparent") +
+    scale_x_continuous(breaks = seq(16, 28, by = 4)) +
+    scale_y_continuous(breaks = seq(-36, -28, by = 4)) +
+    coord_sf(
+      xlim = c(bbox["xmin"] - 0.5, bbox["xmax"] + 0.5),
+      ylim = c(bbox["ymin"] - 0.5, bbox["ymax"] + 0.5),
+      expand = FALSE) +
+    labs(title = esm, tag = tag, x = NULL, y = NULL) +
+    theme_minimal(base_size = 11) +
+    theme(
+      plot.tag.position = c(0.035, 0.987),
+      plot.tag = element_text(size = 12, face = "bold"),
+      panel.border = element_rect(fill = NA, colour = "black", linewidth = 0.5),
+      plot.subtitle    = element_text(size = 10, colour = "grey30"),
+      axis.text        = element_text(size = 9))
+}
+
+p_gfdl <- plot_sst(sst_gfdl, "GFDL", "(a)")
+p_ipsl <- plot_sst(sst_ipsl, "IPSL", "(b)")
+
+combined <- ggarrange(p_gfdl, p_ipsl,
+                      ncol = 2,
+                      common.legend = TRUE,
+                      legend = "right")
+combined
+```
+
+## Save
+
+```{r save}
+ggsave(paste0(outpath,"Fig1_sst_maps.pdf"), combined, width = 10, height = 5)
+```

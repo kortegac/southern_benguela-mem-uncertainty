@@ -1,0 +1,13 @@
+group,sign_full,sign_gfdl,sign_ipsl,mag_full,mag_gfdl,mag_ipsl
+cephalopods,100,100,100,0,0,0
+demersals,75,100,50,75,100,50
+hakes,100,100,100,25,50,0
+large pelagics,25,0,50,25,0,50
+macrobenthos,0,0,0,0,0,0
+marine mammals,100,100,100,25,50,0
+mesopelagics,50,100,0,50,100,0
+phytoplankton,100,100,100,75,100,50
+seabirds,50,0,100,25,0,50
+sharks,50,100,0,50,100,0
+small pelagics,75,50,100,25,50,0
+zooplankton,100,100,100,25,50,0

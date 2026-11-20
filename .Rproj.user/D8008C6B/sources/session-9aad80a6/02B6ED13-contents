@@ -1,0 +1,174 @@
+---
+title: "01 Ocean forcings"
+author: "Kelly Ortega-Cisneros"
+output: html_document
+---
+
+Sea temperature (0-50 m) and integrated primary production from GFDL-ESM4 and IPSL-CM6A-LR.
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+```
+
+```{r libraries}
+library(readxl)
+library(dplyr)
+library(ggplot2)
+library(lubridate)
+library(tidyr)
+library(stringr)
+library(cowplot)
+library(readr)
+
+# Paths relative to the project folder
+forcingDir <- "data/raw/forcing"
+figDir     <- "outputs/figures"
+tableDir   <- "outputs/tables"
+
+other_cols <- c("#0072B2","#E69F00","#D55E00")
+```
+
+## Read gfdl and ipsl datasets
+
+```{r read}
+gfdl_temp <- read_xlsx(file.path(forcingDir, "gfdl_CMIP6_timeseries.xlsx"), sheet = "temp")
+gfdl_intpp <- read_xlsx(file.path(forcingDir, "gfdl_CMIP6_timeseries.xlsx"), sheet = "intpp")
+
+ipsl_temp <- read_xlsx(file.path(forcingDir, "ipsl_CMIP6_timeseries.xlsx"), sheet = "temp")
+ipsl_absintpp <- read_xlsx(file.path(forcingDir, "ipsl_CMIP6_timeseries.xlsx"), sheet = "intpp_abs")
+
+#Combine gfdl and ipsl data into one dataset per variable
+temp <- bind_cols(gfdl_temp[,c(1,8:10)], ipsl_temp[,c(8:10)])
+intpp <- bind_cols(gfdl_intpp[,c(1:4)], ipsl_absintpp[,c(8:10)])
+
+#Make column names more self-explanatory
+colnames(temp) <- c("Time","pi_gfdl", "ssp1_gfdl","ssp5_gfdl", "pi_ipsl","ssp1_ipsl","ssp5_ipsl")
+colnames(intpp) <- c("Time","pi_gfdl", "ssp1_gfdl","ssp5_gfdl", "pi_ipsl","ssp1_ipsl","ssp5_ipsl")
+
+#Calculate annual average
+temp <- temp |> filter(year(Time) <= 2099)
+intpp <- intpp |> filter(year(Time) <= 2099)
+
+temp_yavg <- temp  |> pivot_longer(!Time, names_to = "scenario", values_to = "value") |> mutate(year= year(Time)) |> group_by(year,scenario) |> summarise(value_mean = mean(value, na.rm = TRUE))
+intpp_yavg <- intpp |> pivot_longer(!Time, names_to = "scenario", values_to = "value") |> mutate(year= year(Time)) |> group_by(year,scenario) |> summarise(value_mean = mean(value, na.rm = TRUE))
+```
+
+## Processing time series
+
+```{r fig3, fig.width = 12, fig.height = 8.25}
+g_temp <- temp_yavg |>
+  filter(str_detect(scenario, "_gfdl$"))|>
+  mutate(scenario= case_when(scenario == "pi_gfdl" ~ 'Pre-industrial', scenario == "ssp1_gfdl" ~ 'SSP1-2.6', scenario == "ssp5_gfdl" ~ 'SSP5-8.5'))
+
+i_temp <- temp_yavg |>
+  filter(str_detect(scenario, "_ipsl$"))|>
+  mutate(scenario= case_when(scenario == "pi_ipsl" ~ 'Pre-industrial', scenario == "ssp1_ipsl" ~ 'SSP1-2.6', scenario == "ssp5_ipsl" ~ 'SSP5-8.5'))
+
+a <- ggplot(g_temp, aes(x= year, y= value_mean, color = scenario)) +
+  geom_line(linewidth=1.1) +
+  scale_colour_manual(values = other_cols) +
+  scale_x_continuous(expand = c(0,2)) +
+  scale_y_continuous(limits = c(17, 23), breaks = seq(17, 23, 2)) +
+  xlab("") +
+  ylab("Sea Temperature 0-50m (°C)") +
+  ggtitle("GFDL") +
+  theme_bw() +
+  theme(plot.title = element_text(hjust = 0.5, face = "bold"), plot.background = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.grid.major = element_blank(),legend.position = "none", 
+        plot.margin = margin(5.5, 12, 5.5, 5.5))
+
+b <- ggplot(i_temp, aes(x= year, y= value_mean, color = scenario)) +
+  geom_line(linewidth=1.1) +
+  scale_colour_manual(values = other_cols) +
+  scale_x_continuous(expand = c(0,2)) +
+  scale_y_continuous(limits = c(17, 23), breaks = seq(17, 23, 2)) +
+  xlab("") +
+  ylab("") +
+  ggtitle("IPSL") +
+  theme_bw() +
+  theme(plot.title = element_text(hjust = 0.5, face = "bold"), plot.background = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.grid.major = element_blank(),legend.position = "none",
+        plot.margin = margin(5.5, 12, 5.5, 5.5))
+
+g_pp <- intpp_yavg |>
+  filter(str_detect(scenario, "_gfdl$")) |>
+  mutate(scenario= case_when(scenario == "pi_gfdl" ~ 'Pre-industrial', scenario == "ssp1_gfdl" ~ 'SSP1-2.6', scenario == "ssp5_gfdl" ~ 'SSP5-8.5'))
+
+i_pp <- intpp_yavg |>
+  filter(str_detect(scenario, "_ipsl$"))|>
+  mutate(scenario= case_when(scenario == "pi_ipsl" ~ 'Pre-industrial', scenario == "ssp1_ipsl" ~ 'SSP1-2.6', scenario == "ssp5_ipsl" ~ 'SSP5-8.5'))
+
+c <- ggplot(g_pp, aes(x= year, y= value_mean, color = scenario)) +
+  geom_line(linewidth=1.1) +
+  scale_colour_manual(values = other_cols) +
+  scale_x_continuous(expand = c(0,2)) +
+  scale_y_continuous(limits = c(7E-7, 1.1E-6)) +
+  xlab("") +
+  ylab(expression("Integrated Primary Production (mol m"^-2*" s"^-1*")")) +  
+  theme_bw() +
+  theme(plot.background = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.grid.major = element_blank(),legend.position = "none",
+        plot.margin = margin(5.5, 12, 5.5, 5.5))
+
+d <- ggplot(i_pp, aes(x= year, y= value_mean, color = scenario)) +
+  geom_line(linewidth=1.1) +
+  scale_colour_manual(values = other_cols) +
+  scale_x_continuous(expand = c(0,2)) +
+  scale_y_continuous(limits = c(7E-7, 1.1E-6)) +
+  xlab("") +
+  ylab('') +
+  theme_bw() +
+  theme(plot.background = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.grid.major = element_blank(),legend.position = "none",
+        plot.margin = margin(5.5, 12, 5.5, 5.5))
+
+leg <- ggplot(g_temp, aes(x= year, y= value_mean, color = scenario)) +
+  geom_line(linewidth =0.8) +
+  scale_colour_manual(values = other_cols) +
+  scale_x_continuous(expand = c(0,2)) +
+  scale_y_continuous(limits = c(17, 23), breaks = seq(17, 23, 2)) +
+  theme_bw()
+
+legend <- get_legend(leg + guides(color = guide_legend(nrow = 1, title = NULL)))
+
+plot1 <- plot_grid(a, b, c, d, labels = c('(a)', '(b)', '(c)', '(d)'), hjust = -4, vjust = 4, align = "vh")
+
+fig3 <- plot_grid(plot1, legend, ncol = 1, rel_heights = c(1, 0.05))
+fig3
+
+ggsave(file.path(figDir, "Fig3_timeseries.pdf"), fig3, width = 12, height = 8.25) 
+```
+
+## Change between 1990-2009 and 2080-2099 
+
+```{r deltas}
+gtemp_delta <- g_temp |>
+  group_by(scenario) |>
+  mutate(start = year >= 1990 & year <= 2009, end = year >= 2080)  |>
+  summarize(startB = mean(value_mean[start == 'TRUE'], na.rm = TRUE), startSD = sd(value_mean[start == 'TRUE'], na.rm = TRUE), endB = mean(value_mean[end == 'TRUE'], na.rm = TRUE), endSD = sd(value_mean[end == 'TRUE'], na.rm = TRUE))
+
+itemp_delta <- i_temp |>
+  group_by(scenario) |>
+  mutate(start = year >= 1990 & year <= 2009, end = year >= 2080)  |>
+  summarize(startB = mean(value_mean[start == 'TRUE'], na.rm = TRUE), startSD = sd(value_mean[start == 'TRUE'], na.rm = TRUE), endB = mean(value_mean[end == 'TRUE'], na.rm = TRUE), endSD = sd(value_mean[end == 'TRUE'], na.rm = TRUE))
+
+gpp_delta <- g_pp |>
+  group_by(scenario) |>
+  mutate(start = year >= 1990 & year <= 2009, end = year >= 2080)  |>
+  summarize(startB = mean(value_mean[start == 'TRUE'], na.rm = TRUE), startSD = sd(value_mean[start == 'TRUE'], na.rm = TRUE), endB = mean(value_mean[end == 'TRUE'], na.rm = TRUE), endSD = sd(value_mean[end == 'TRUE'], na.rm = TRUE))
+
+ipp_delta <- i_pp |>
+  group_by(scenario) |>
+  mutate(start = year >= 1990 & year <= 2009, end = year >= 2080)  |>
+  summarize(startB = mean(value_mean[start == 'TRUE'], na.rm = TRUE), startSD = sd(value_mean[start == 'TRUE'], na.rm = TRUE), endB = mean(value_mean[end == 'TRUE'], na.rm = TRUE), endSD = sd(value_mean[end == 'TRUE'], na.rm = TRUE))
+
+# Saving the four summaries in one table
+forcing_delta <- bind_rows(gtemp_delta |> mutate(esm = "gfdl", var = "temp"), itemp_delta |> mutate(esm = "ipsl", var = "temp"), gpp_delta |> mutate(esm = "gfdl", var = "intpp"), ipp_delta |> mutate(esm = "ipsl", var = "intpp"))
+
+write_csv(forcing_delta, file.path(tableDir, "forcing_delta.csv"))
+forcing_delta
+```

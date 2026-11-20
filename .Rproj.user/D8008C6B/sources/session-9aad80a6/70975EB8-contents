@@ -1,0 +1,143 @@
+---
+title: "06 nMDS of community-level indicators"
+author: "Kelly Ortega-Cisneros"
+output: html_document
+---
+
+NMDS analysis on fished runs
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+```
+
+```{r libraries}
+library(tidyverse)
+library(vegan)
+library(ggpubr)
+
+# Paths relative to the project folder
+outputDir <- "outputs/processed"
+figDir <- "outputs/figures"
+tableDir <- "outputs/tables"
+
+sb_area <- 220000 #km2 to correct EwE B and C outputs
+year_EwE <- c(1978:2099)
+year_atlantis <- c(1990:2099)
+
+# group biomass read once from 03_group_biomass
+
+gb <- readRDS(file.path(outputDir, "group_biomass.rds"))
+groups <- c(tphyto = "phyto", tzoop = "zoop", mesop = "meso", ceps = "ceps", SH = "sharks", SB = "sb",
+            MB = "mb", spel = "sp", hakes = "hakes", demersals = "dem", lpel = "lp", mammals = "ma")
+to_long <- function(df, name, years) {
+  df |> mutate(year = years) |>
+    pivot_longer(!year, names_to = c("scen", "F", "esm"), names_sep = "_", values_to = name)
+}
+```
+
+## EwE
+
+```{r ewe}
+data <- map2(gb$ewe[names(groups)], groups, to_long, years = year_EwE) |>
+  reduce(left_join, by = c("year", "scen", "F", "esm"))
+
+data_F <- data |> filter(F == "F", scen != "pi", year >= 1990) |> select(-F) 
+# Subset response and explanatory variables
+dataF_bio <- data_F[ , !colnames(data_F) %in% c("year", "scen", "esm")]
+dataF_explan <- data_F[ , colnames(data_F) %in% c("year", "scen", "esm")]
+
+set.seed(42)
+nmds <- metaMDS(comm = dataF_bio, autotransform = TRUE, distance = "bray", engine = "monoMDS", k = 2,
+                weakties = TRUE, model = "global", maxit = 200, try = 40,
+                trymax = 100)
+
+print(nmds)
+stressplot(nmds, p.col = "steelblue", l.col = "red", lwd = 2)
+
+nmds.points <- data.frame(nmds$points)
+stress <- round(nmds$stress,3)
+
+#Binding nmds results with exploratory variables to plot ordination
+dataF_e.all <- nmds.points |>
+  bind_cols(dataF_explan)
+
+#Plot with colours set for scenarios and shapes for ESMs
+p_F_EwE <- dataF_e.all |>
+  mutate(scenario = case_when(year < 2015 & scen == "ssp126" ~ "historical", year < 2015 & scen == "ssp585" ~ "historical", year >= 2015 & scen == "ssp126" ~ "SSP1-2.6", year >= 2015 & scen == "ssp585" ~ "SSP5-8.5")) |>
+  select(-scen) |>
+  ggplot(aes(x = MDS1, y = MDS2, colour= scenario, shape =esm)) +
+  labs(x = "NMDS1", y = "NMDS2") +
+  annotate("text", x=Inf, y=Inf, hjust=1.1, vjust=1.5, label= paste0("stress = ", stress), size=4) + 
+  geom_point() +
+  ggtitle("EwE") +
+  theme_bw() +
+  theme(plot.title = element_text(hjust = 0.5, face = "bold"), axis.text = element_blank(), axis.ticks = element_blank(), plot.background = element_blank(),
+        panel.grid.minor = element_blank(), panel.grid.major = element_blank(), legend.position = "")
+```
+
+## Atlantis
+
+```{r atlantis}
+data_a <- map2(gb$atl[names(groups)], groups, to_long, years = year_atlantis) |>
+  reduce(left_join, by = c("year", "scen", "F", "esm"))
+
+data_F_a <- data_a |> filter(F == "F", scen != "pi") |> select(-F)
+
+# Subset response and explanatory variables
+dataF_bio_a <- data_F_a[ , !colnames(data_F_a) %in% c("year", "scen", "esm")]
+dataF_explan_a <- data_F_a[ , colnames(data_F_a) %in% c("year", "scen", "esm")]
+
+dataF_bio_a <- dataF_bio_a/sb_area
+
+set.seed(42)
+nmds <- metaMDS(comm = dataF_bio_a, autotransform = TRUE, distance = "bray", engine = "monoMDS", k = 2,
+                weakties = TRUE, model = "global", maxit = 200, try = 40,
+                trymax = 100)
+
+print(nmds)
+stressplot(nmds, p.col = "steelblue", l.col = "red", lwd = 2)
+
+nmds.points <- data.frame(nmds$points)
+stress_a <- round(nmds$stress,3)
+
+#Binding nmds results with exploratory variables to plot ordination
+dataF_a.all <- nmds.points |>
+  bind_cols(dataF_explan_a)
+
+p_F_Atl <- dataF_a.all |>
+  mutate(scenario = case_when(year < 2015 & scen == "ssp126" ~ "Historical", year < 2015 & scen == "ssp585" ~ "Historical", year >= 2015 & scen == "ssp126" ~ "SSP1-2.6", year >= 2015 & scen == "ssp585" ~ "SSP5-8.5"),  esm = toupper(esm)) |>
+  select(-scen) |>
+  ggplot(aes(x = MDS1, y = MDS2, colour= scenario, shape = esm)) +
+  labs(x = "NMDS1", y = "NMDS2", colour = "Scenario", shape = "ESM") +
+  annotate("text", x=Inf, y=Inf, hjust=1.1, vjust=1.5, label= paste0("stress = ", stress_a), size=4) + 
+  geom_point() +
+  ggtitle("Atlantis") +
+  theme_bw() +
+  theme(plot.title = element_text(hjust = 0.5, face = "bold"), axis.text = element_blank(), axis.ticks = element_blank(), plot.background = element_blank(),
+        panel.grid.minor = element_blank(), panel.grid.major = element_blank(), legend.position = "")
+```
+
+## Fig 5
+
+```{r fig5, fig.width = 10, fig.height = 6}
+#Legend
+leg <- p_F_Atl + theme(legend.position = "bottom", legend.justification = "center", legend.box = "horizontal", legend.box.just = "center",
+                       legend.text = element_text(size = 12),
+                       legend.title = element_text(size = 12),
+                       legend.key.size = unit(1.5, "lines")) +
+                       guides(colour = guide_legend(override.aes = list(size = 4, shape = 15)),  # shape 15 = filled square
+                       shape = guide_legend(override.aes = list(size = 4)))
+
+# Extract legend
+legend <- get_legend(leg)
+
+fig5 <- ggarrange(ggarrange(p_F_Atl, p_F_EwE, ncol = 2, labels = c('(a)', '(b)'), font.label = list(size = 14, face = "bold"),  # Label size and style
+            hjust = -1.25,   # Move labels left (negative) or right (positive)
+            vjust = 3.45),   # Move labels up (positive) or down (negative)
+  legend, ncol = 1, heights = c(1, 0.15))  # Increase legend height if needed
+fig5
+ggsave(file.path(figDir, "Fig5_nmds_combined.pdf"), fig5, height = 6, width = 10)
+
+# Save stress values
+write_csv(tibble(model = c("Atlantis", "EwE"), stress = c(stress_a, stress)), file.path(tableDir, "nmds_stress.csv"))
+```

@@ -1,0 +1,26 @@
+{
+    "id": "C6CD1790",
+    "path": "~/Documents/Fish-MIP/scripts/3b_paper/southern_benguela-mem-uncertainty/scripts/07_uncertainty_partitioning.Rmd",
+    "project_path": "scripts/07_uncertainty_partitioning.Rmd",
+    "type": "r_markdown",
+    "hash": "892773088",
+    "contents": "",
+    "dirty": false,
+    "created": 1793865348621.0,
+    "source_on_save": false,
+    "relative_order": 7,
+    "properties": {
+        "source_window_id": "",
+        "Source": "Source",
+        "cursorPosition": "180,2",
+        "scrollLine": "169"
+    },
+    "folds": "",
+    "lastKnownWriteTime": 1795149832,
+    "encoding": "UTF-8",
+    "collab_server": "",
+    "source_window": "",
+    "last_content_update": 1795149832785,
+    "read_only": false,
+    "read_only_alternatives": []
+}

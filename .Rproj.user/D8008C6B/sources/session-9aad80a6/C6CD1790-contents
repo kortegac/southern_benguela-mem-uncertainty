@@ -1,0 +1,227 @@
+---
+title: "07 Uncertainty partitioning"
+author: "Script from Jon Reum (Reum et al 2021), adapted by Kelly Ortega for the southern Benguela application"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+```
+
+```{r libraries}
+library(reshape2)
+library(ggplot2)
+library(mgcv)
+library(dplyr)
+library(readr)
+library(zoo)
+library(purrr)
+```
+
+Set up the parameters:
+```{r parameters}
+# Paths relative to the project folder
+outBfilepath <- "outputs/processed/B"
+outputDir <- "outputs/processed"
+figDir <- "outputs/figures"
+
+# Color palette
+varPalette <- c(ESM = "dodgerblue", MEM = "grey70", SSP = "orange") 
+
+sb_area <- 220000 #km2 to correct EwE B and C outputs
+year_EwE <- c(1978:2099)
+year_atlantis <- c(1990:2099)
+```
+
+## Pre-processing data for both Atlantis and EwE outputs to get one dataset with both model outputs
+```{r preprocessing}
+# Columns selected by name (fished runs only)
+
+ssp_cols <- c("ssp126_F_gfdl", "ssp585_F_gfdl", "ssp126_F_ipsl", "ssp585_F_ipsl")
+
+# group biomass read once from 03_group_biomass (same groups and order as before: phyto, zoo, meso, ceps, sharks, seabirds, macrobenthos, small pelagics, hakes, demersals, large pelagics, mammals)
+gb <- readRDS(file.path(outputDir, "group_biomass.rds"))
+
+ewe <- (bind_cols(map(gb$ewe, ~ select(.x, all_of(ssp_cols))))*sb_area)/1E6
+ewe <- bind_cols(year = year_EwE, ewe)
+
+atl <- bind_cols(map(gb$atl, ~ select(.x, all_of(ssp_cols))))/1E6
+atl <- bind_cols(year = year_atlantis, atl)
+
+#Joining datasets
+Dat1 <- ewe |> full_join(atl, by = "year")
+```
+
+## Centering data (reference period 1990-2014)
+
+```{r centering}
+# Centering; each run minus its 1990-2014 mean, years 2015-2099 kept
+Dat1_centered <- Dat1 |>
+  mutate(across(-year, ~ .x - mean(.x[year %in% 1990:2014]))) |>
+  filter(year %in% 2015:2099)
+
+colnames(Dat1_centered) <- c("",rep("V", 96))
+write_csv(Dat1_centered, paste0(outputDir,"/Dat1_sb_centered.csv"))
+```
+
+## Reading centered data
+
+```{r read-centered}
+Dat1_centered <- read.csv(paste0(outputDir,"/Dat1_sb_centered.csv"), row.names = 1)
+Heads<-read.csv("data/design/Heads1_sb.csv") 
+
+rownames(Heads)<- c("species", "model", "esm", "ssp")
+
+Heads=Heads
+Dat1=Dat1_centered
+Nspec=12 #functional groups
+```
+
+# Function to calculate variance. The analysis first uses all the data for all 85 years to fit the regression, only then the var is calculated by year update function based on Jon's feedback
+
+```{r computejon}
+ComputeJon <- function(Heads,Dat1,Nspec,Yr1=1,Yr2=85)
+{
+  Dat2 <- Dat1[Yr1:Yr2,]; Yrs <- Yr1:Yr2; Nyr <- length(Yrs)
+  Nspec <- length(unique(as.numeric(Heads[1,])))
+  Nmodel <- length(unique(as.numeric(Heads[2,])))
+  NESM <- length(unique(as.numeric(Heads[3,])))
+  NSSP <- length(unique(as.numeric(Heads[4,])))
+
+ VarOut <- array(0,dim=c(Nspec,3,Nyr), dimnames=list(species=1:Nspec, VarComp=c("MEM","ESM","SSP"), Year=1:Nyr))
+ VarInt <- array(0,dim=c(Nspec,4), dimnames=list(species=1:Nspec, VarComp=c("V","V0","V1","V2")))
+
+  # Loop over species
+  for (Ispec in 1:Nspec)
+  {
+    Obs <- array(0,dim=c(Nmodel,NESM,NSSP,Nyr))
+    Poly <- array(0,dim=c(Nmodel,NESM,NSSP,Nyr))
+    Resid <- array(0,dim=c(Nmodel,NESM,NSSP,Nyr))
+    Models <- which(Heads[1,]==Ispec)
+    Nrun <- length(Models)
+    ModelW <- 1/Nrun; V <- 0 ; V1 <-0; V2<-0; V0 <-0
+
+    Vvec<- rep(0, Nrun)
+
+    #Get polynomial trends
+    for (II in 1:Nrun)
+    {
+      Imodel <- Heads[2,Models[II]]
+      Iesm <- Heads[3,Models[II]]
+      Issp <- Heads[4,Models[II]]
+      yobs <- Dat2[,Models[II]]
+      lm1 <-  gam(yobs~s(Yrs, k=4)) #and just fit a spline like in Reum et al. 2020
+      Pred <- predict((lm1))
+      Poly[Imodel,Iesm,Issp,] <- Pred
+      Obs[Imodel,Iesm,Issp,] <- yobs
+      Resid[Imodel,Iesm,Issp,] <- yobs - Pred
+      #Internal var 2015-2099 (all years, as in Hawkins & Sutton)
+      V <- V + ModelW*var(Resid[Imodel,Iesm,Issp,])
+    
+      V0 <- V0 + ModelW*var(Resid[Imodel,Iesm,Issp,1:26])   # corresponds to 2015-2040 as in Reum et al 2020
+
+      V1 <- V1 + ModelW*var(Resid[Imodel,Iesm,Issp,27:66])
+
+      V2 <- V2 + ModelW*var(Resid[Imodel,Iesm,Issp,67:85])
+    }
+
+    MuT <- rep(0,Nyr); VarT <- rep(0,Nyr)
+    MuMod <- rep(0,Nyr); VarMod <- rep(0,Nyr)
+    MuESM <- rep(0,Nyr); VarESM <- rep(0,Nyr)
+    MuSSP <- rep(0,Nyr); VarSSP <- rep(0,Nyr)
+    AlphaMod <- matrix(0,nrow=Nmodel,ncol=Nyr)
+    AlphaESM <- matrix(0,nrow=NESM,ncol=Nyr)
+    AlphaSSP <- matrix(0,nrow=NSSP,ncol=Nyr)
+
+    # Loop through each year and calculate variance on trends for model, ESM, SSP
+    for (Iy in 1:Nyr)
+    {
+      yvals <- NULL; xvals1 <- NULL; xvals2 <- NULL; xvals3 <- NULL
+      for (Imodel in 1:Nmodel)
+       for (IESM in 1:NESM)
+        for (ISSP in 1:NSSP)
+         {
+          yvals <- c(yvals,Poly[Imodel,IESM,ISSP,Iy])
+          xvals1 <- c(xvals1,Imodel)
+          xvals2 <- c(xvals2,IESM)
+          xvals3 <- c(xvals3,ISSP)
+        }
+
+      MuT[Iy] <- mean(Poly[,,,Iy])
+      VarT[Iy] <- sum((as.vector(Poly[,,,Iy]-mean(Poly[,,,Iy])))^2)/(Nmodel*NESM*NSSP)
+
+      if (Nmodel > 1)
+       {
+        for (Imodel in 1:Nmodel)
+         AlphaMod[Imodel,Iy] <- mean(Poly[Imodel,,,Iy])-mean(Poly[,,,Iy])
+         VarMod[Iy] <- sum((as.vector(AlphaMod[,Iy]))^2)/Nmodel
+        }
+      if (NESM>1)
+       {
+        for (IESM in 1:NESM)
+        AlphaESM[IESM,Iy] <- mean(Poly[,IESM,,Iy])-mean(Poly[,,,Iy])
+        VarESM[Iy] <- sum((as.vector(AlphaESM[,Iy]))^2)/NESM
+      }
+      if (NSSP>1)
+       {
+        for (ISSP in 1:NSSP)
+        AlphaSSP[ISSP,Iy] <- mean(Poly[,,ISSP,Iy])-mean(Poly[,,,Iy])
+        VarSSP[Iy] <- sum((as.vector(AlphaSSP[,Iy]))^2)/NSSP
+      }
+        }
+    VarOut[Ispec,1,] <- VarMod
+    VarOut[Ispec,2,] <- VarESM
+    VarOut[Ispec,3,] <- VarSSP
+    VarInt[Ispec,1] <- V
+    VarInt[Ispec,2] <- V0
+    VarInt[Ispec,3] <- V1
+    VarInt[Ispec,4] <- V2
+
+  } # Nspec
+  
+  print(VarInt)
+  return(VarOut)
+
+}
+```
+
+```{r run}
+#modifying years here to calculate variance from year 1 (2015) to 85 (2099) as new centered dataset starts in 2015
+out<-ComputeJon(Heads=Heads,Dat1=Dat1,Nspec=12,Yr1=1,Yr2=85)
+
+test<-melt(out)
+
+#Saving dataset
+write_csv(test,paste0(outputDir,"/uncertainty_partitition_sBenguela_centered.csv"))
+```
+
+## Uncertainty percentages and Fig 6
+
+```{r fig6, fig.width = 12, fig.height = 11}
+# Convert uncertainty values per source into %s of the total uncertainty, and calculate a rolling mean to smooth the contributions by the different uncertainty sources
+
+var_centered_pc <- test |>
+  group_by(species, Year)|>
+  mutate(total_var = sum(value)) |>
+  mutate(percent = value/total_var*100) |>
+  group_by(species, VarComp)|>
+  mutate(r_mean = rollmean(percent, k = 10, fill = NA, align = "right")) #may need to change align to left to get values from the start of the ts
+
+#Saving uncertainty partition %s dataset
+write_csv(var_centered_pc,paste0(outputDir,"/uncertainty_partitition_sBenguela_centered_percent.csv"))
+var_centered_pc <- read_csv(paste0(outputDir,"/uncertainty_partitition_sBenguela_centered_percent.csv"))
+
+#Plot of uncertainty sources by functional group (REV: 6a and 6b combined in one figure, R1)
+fig6 <- var_centered_pc |>
+  ggplot(aes(fill=VarComp, y=percent, x=Year)) +
+  geom_area(position = "stack", alpha = 0.7) +
+  facet_wrap(~species, scale="free", ncol =3, labeller = labeller(species = c("1" = "Phytoplankton","2" = "Zooplankton", "3" = "Mesopelagics", "4" = "Cephalopods", "5" = "Sharks","6" = "Seabirds", "7" =  "Macrobenthos", "8" = "Small pelagics", "9" = "Hakes", "10" = "Demersals", "11" = "Large pelagics", "12" = "Marine mammals"))) +
+  scale_x_continuous(expand = c(0, 0)) +
+  scale_y_continuous(expand = c(0, 0)) +
+  scale_fill_manual(values=varPalette) +
+  ylab("Uncertainty (%)") + labs(fill='') + theme_bw() +
+  theme(plot.background = element_blank(), panel.grid.minor = element_blank(), panel.grid.major = element_blank(), legend.position = "bottom")
+
+fig6
+ggsave(file.path(figDir, "Fig6_uncertainty_partition.pdf"), fig6, height = 11, width = 12)
+```

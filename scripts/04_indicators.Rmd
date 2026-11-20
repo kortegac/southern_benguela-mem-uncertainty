@@ -1,0 +1,220 @@
+---
+title: "04 Biomass trends, change and model agreement"
+author: "Kelly Ortega-Cisneros"
+output: html_document
+---
+
+Calculates relative biomass, linear regression, change between 1990-2009 and 2080-2099, model agreement and Kempton's Q-90.
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+```
+
+```{r libraries}
+library(tidyverse)
+library(broom)
+
+# Reading paths
+outBfilepath <- "outputs/processed/B"
+outputDir <- "outputs/processed"
+tableDir <- "outputs/tables"
+
+year_EwE <- c(1978:2099)
+year_atlantis <- c(1990:2099)
+ref_years <- c(1990:2009) 
+```
+
+## Functions (estimate values relative to the 1990-2009 mean instead of the first year)
+
+```{r functions}
+# biomass relative to the 1990-2009 mean of each run, years 1990-2099 kept for both models
+
+relB_ref <- function(df, time) {df |>
+    mutate (relpi_F_gfdl = pi_F_gfdl/mean(pi_F_gfdl[time %in% ref_years]), relssp1_F_gfdl = ssp126_F_gfdl/mean(ssp126_F_gfdl[time %in% ref_years]), relssp5_F_gfdl = ssp585_F_gfdl/mean(ssp585_F_gfdl[time %in% ref_years]), relpi_F_ipsl = pi_F_ipsl/mean(pi_F_ipsl[time %in% ref_years]), relssp1_F_ipsl = ssp126_F_ipsl/mean(ssp126_F_ipsl[time %in% ref_years]), relssp5_F_ipsl = ssp585_F_ipsl/mean(ssp585_F_ipsl[time %in% ref_years])) |>
+    select(-pi_F_gfdl, -ssp126_F_gfdl, -ssp585_F_gfdl, -pi_F_ipsl, -ssp126_F_ipsl, -ssp585_F_ipsl) |>
+    mutate(time = time) |>
+    filter(time >= 1990) |>
+    pivot_longer(!time, names_to = "scenario", values_to = "biomass") |>
+    mutate(esm = case_when(scenario == 'relpi_F_gfdl' | scenario == 'relssp1_F_gfdl' | scenario == 'relssp5_F_gfdl' ~ 'gfdl', scenario == 'relpi_F_ipsl' | scenario == 'relssp1_F_ipsl' | scenario == 'relssp5_F_ipsl' ~ 'ipsl')) |>
+    mutate(scen = case_when(scenario == 'relpi_F_gfdl' | scenario == 'relpi_F_ipsl' ~ 'pi_F', scenario == 'relssp1_F_gfdl' | scenario == 'relssp1_F_ipsl' ~ 'ssp126_F', scenario == 'relssp5_F_gfdl' | scenario == 'relssp5_F_ipsl' ~ 'ssp585_F')) |> select(-scenario)
+}
+
+##### average and SD of the reference period (1990-2009, both models) and the last 20 years of the simulation (2080-2099)
+summary_startend <- function(df) {df  |>
+  mutate(start = time >= 1990 & time <= 2009, end = time >= 2080) |>
+  group_by(esm, scen, EM) |>
+  summarize(startB = mean(biomass[start], na.rm = TRUE), startSD = sd(biomass[start], na.rm = TRUE),  endB = mean(biomass[end], na.rm = TRUE), endSD = sd(biomass[end], na.rm = TRUE), .groups = "drop") |>
+  mutate(change = (endB/startB - 1)*100) # % change relative to the 1990-2009 mean
+}
+
+##### magnitude class of a % change (L <=20, M <=40, MH <=60, H <=100, O >100), same for increases and declines
+mag_class <- function(x) {
+  case_when(abs(x) <= 20 ~ "L", abs(x) <= 40 ~ "M", abs(x) <= 60 ~ "MH", abs(x) <= 100 ~ "H", x > 100 ~ "O")
+}
+```
+
+## Read group biomass
+
+```{r read}
+# Read biomass from 03_group_biomass
+gb <- readRDS(file.path(outputDir, "group_biomass.rds"))
+
+#EwE groups
+tphyto <- gb$ewe$tphyto; tzoop <- gb$ewe$tzoop; MB <- gb$ewe$MB; spel <- gb$ewe$spel
+hakes <- gb$ewe$hakes; demersals <- gb$ewe$demersals; lpel <- gb$ewe$lpel; mammals <- gb$ewe$mammals
+SH <- gb$ewe$SH; ceps <- gb$ewe$ceps; SB <- gb$ewe$SB; mesop <- gb$ewe$mesop
+
+#Atlantis groups
+tphyto_a <- gb$atl$tphyto; tzoop_a <- gb$atl$tzoop; BM <- gb$atl$MB; spel_a <- gb$atl$spel
+hakes_a <- gb$atl$hakes; dem <- gb$atl$demersals; lpel_a <- gb$atl$lpel; mammals_a <- gb$atl$mammals
+SH_a <- gb$atl$SH; ceps_a <- gb$atl$ceps; SB_a <- gb$atl$SB; mesop_a <- gb$atl$mesop
+```
+
+## Relative biomass to the 1990-2009 mean
+
+```{r relative}
+rel_p <- relB_ref(tphyto, year_EwE) |> mutate(EM = 'EwE')
+rel_z <- relB_ref(tzoop, year_EwE) |> mutate(EM = 'EwE')
+rel_mb <- relB_ref(MB, year_EwE) |> mutate(EM = 'EwE')
+rel_sp <- relB_ref(spel, year_EwE) |> mutate(EM = 'EwE')
+rel_h <- relB_ref(hakes, year_EwE) |> mutate(EM = 'EwE')
+rel_d <- relB_ref(demersals, year_EwE) |> mutate(EM = 'EwE')
+rel_lp <- relB_ref(lpel, year_EwE) |> mutate(EM = 'EwE')
+rel_m <- relB_ref(mammals, year_EwE) |> mutate(EM = 'EwE')
+rel_sh <- relB_ref(SH, year_EwE) |> mutate(EM = 'EwE')
+rel_cp <- relB_ref(ceps, year_EwE) |> mutate(EM = 'EwE')
+rel_b <- relB_ref(SB, year_EwE) |> mutate(EM = 'EwE')
+rel_mf <- relB_ref(mesop, year_EwE) |> mutate(EM = 'EwE')
+
+rel_phytoB <- relB_ref(tphyto_a, year_atlantis) |> mutate(EM = 'Atlantis') |> bind_rows(rel_p)
+rel_zoopB <- relB_ref(tzoop_a, year_atlantis) |> mutate(EM = 'Atlantis') |> bind_rows(rel_z)
+rel_Bent <- relB_ref(BM, year_atlantis) |> mutate(EM = 'Atlantis') |> bind_rows(rel_mb)
+rel_spB <- relB_ref(spel_a, year_atlantis) |> mutate(EM = 'Atlantis') |> bind_rows(rel_sp)
+rel_hakeB <- relB_ref(hakes_a, year_atlantis) |> mutate(EM = 'Atlantis') |> bind_rows(rel_h)
+rel_demB <- relB_ref(dem, year_atlantis) |> mutate(EM = 'Atlantis') |> bind_rows(rel_d)
+rel_lpB <- relB_ref(lpel_a, year_atlantis) |> mutate(EM = 'Atlantis') |> bind_rows(rel_lp)
+rel_mammalsB <- relB_ref(mammals_a, year_atlantis) |> mutate(EM = 'Atlantis') |> bind_rows(rel_m)
+rel_sharksB <- relB_ref(SH_a, year_atlantis) |> mutate(EM = 'Atlantis') |> bind_rows(rel_sh)
+rel_cepsB <- relB_ref(ceps_a, year_atlantis) |> mutate(EM = 'Atlantis') |> bind_rows(rel_cp)
+rel_sbB <- relB_ref(SB_a, year_atlantis) |> mutate(EM = 'Atlantis') |> bind_rows(rel_b)
+rel_mesopB <- relB_ref(mesop_a, year_atlantis) |> mutate(EM = 'Atlantis') |> bind_rows(rel_mf)
+```
+
+## Linear regression of relative biomass, 1990-2099
+
+```{r regression}
+# Loop over the 12 indicators, fished SSP runs only
+rel_list <- list(rel_cepsB = rel_cepsB, rel_demB = rel_demB, rel_hakeB = rel_hakeB, rel_lpB = rel_lpB, rel_Bent = rel_Bent, rel_mammalsB = rel_mammalsB, rel_mesopB = rel_mesopB, rel_phytoB = rel_phytoB, rel_sbB = rel_sbB, rel_sharksB = rel_sharksB, rel_spB = rel_spB, rel_zoopB = rel_zoopB)
+
+lreg_all <- list()
+
+for (group in names(rel_list)) {
+data <- rel_list[[group]]
+
+#piControl runs added as a no-climate-change reference
+scen_ga1 <- data |> filter(esm == "gfdl" & EM== "Atlantis" & scen == "pi_F")
+scen_ge1 <- data |> filter(esm == "gfdl" & EM== "EwE" & scen == "pi_F")
+scen_ia1 <- data |> filter(esm == "ipsl" & EM== "Atlantis" & scen == "pi_F")
+scen_ie1 <- data |> filter(esm == "ipsl" & EM== "EwE" & scen == "pi_F")
+
+scen_ga3 <- data |> filter(esm == "gfdl" & EM== "Atlantis" & scen == "ssp126_F")
+scen_ga5 <- data |> filter(esm == "gfdl" & EM== "Atlantis" & scen == "ssp585_F")
+scen_ge3 <- data |> filter(esm == "gfdl" & EM== "EwE" & scen == "ssp126_F")
+scen_ge5 <- data |> filter(esm == "gfdl" & EM== "EwE" & scen == "ssp585_F")
+
+scen_ia3 <- data |> filter(esm == "ipsl" & EM== "Atlantis" & scen == "ssp126_F")
+scen_ia5 <- data |> filter(esm == "ipsl" & EM== "Atlantis" & scen == "ssp585_F")
+scen_ie3 <- data |> filter(esm == "ipsl" & EM== "EwE" & scen == "ssp126_F")
+scen_ie5 <- data |> filter(esm == "ipsl" & EM== "EwE" & scen == "ssp585_F")
+
+#array to store the coefficients and other measurements from the regression
+fmip_lreg <- array(numeric(), c(12,4))
+colnames(fmip_lreg) <- c("intercept", "slope", "r.squared", "p.value")
+
+scen_lm <- c("scen_ga1", "scen_ge1", "scen_ia1", "scen_ie1", "scen_ga3", "scen_ga5", "scen_ge3", "scen_ge5", "scen_ia3", "scen_ia5", "scen_ie3", "scen_ie5")
+
+#Loop through all scenarios to do the linear regression
+for (s in seq(1,12,1)) {
+  input <- eval(parse(text = scen_lm[s]))
+  fishmip_group <- input$biomass
+  time <- input$time
+
+  # Linear fits
+  fishmip_lm <- lm(fishmip_group ~ time)
+
+  # Save slope and intercept, for diagnostics
+  fmip_lreg[s,1] <- fishmip_lm$coefficients[1]
+  fmip_lreg[s,2] <- fishmip_lm$coefficients[2]
+  fmip_lreg[s,3] <- glance(fishmip_lm)$r.squared
+  fmip_lreg[s,4] <- glance(fishmip_lm)$p.value
+}
+# Keeping scenario labels and store all groups in one table
+lreg_all[[group]] <- as_tibble(fmip_lreg) |> mutate(group = group, scen = scen_lm)
+}
+
+table1_lreg <- bind_rows(lreg_all) |>
+  mutate(pct_century = slope * 100 * 100) # slope of relative biomass (per year) as % change per century 
+write_csv(table1_lreg, file.path(tableDir, "table1_linear_reg.csv"))
+```
+
+## Change in the mean of the reference period (1990-2009) and the last 20 years of simulations
+
+```{r change}
+summary_PB <- summary_startend(rel_phytoB)
+summary_ZB <- summary_startend(rel_zoopB)
+summary_MB <- summary_startend(rel_Bent)
+summary_SP <- summary_startend(rel_spB)
+summary_Hake <- summary_startend(rel_hakeB)
+summary_Dem <- summary_startend(rel_demB)
+summary_LP <- summary_startend(rel_lpB)
+summary_MM <- summary_startend(rel_mammalsB)
+summary_SH <- summary_startend(rel_sharksB)
+summary_Cep <- summary_startend(rel_cepsB)
+summary_SB <- summary_startend(rel_sbB)
+summary_MP <- summary_startend(rel_mesopB)
+
+summary_changeB <- bind_rows(summary_PB |> mutate(group = "phytoplankton"), summary_ZB |> mutate(group = "zooplankton"), summary_MB |> mutate(group = "macrobenthos"), summary_SP |> mutate(group = "small pelagics"), summary_Hake |> mutate(group = "hakes"), summary_Dem |> mutate(group = "demersals"),
+summary_LP |> mutate(group = "large pelagics"), summary_MM |> mutate(group = "marine mammals"), summary_SH |> mutate(group = "sharks"), summary_Cep |> mutate(group = "cephalopods"), summary_SB |> mutate(group = "seabirds"), summary_MP |> mutate(group = "mesopelagics"))
+
+summary_changeB |>
+  filter(scen != "pi_F") |>
+  summarise(n = n(), pct_below61 = mean(abs(change) < 61) * 100)
+
+write_csv(summary_changeB, file.path(outputDir, "summary_changeB.csv"))
+```
+
+## Model agreement (Table 2)
+
+```{r agreement}
+# % change by run in wide format (one column per ESM and MEM), SSP runs only
+change_wide <- summary_changeB |>
+  filter(scen != "pi_F") |>
+  select(-startB,-startSD,-endB, -endSD) |>
+  pivot_wider(names_from = c(esm, EM), values_from = change)
+
+write_csv(change_wide, file.path(outputDir, "change_wide.csv"))
+
+#further manipulating the data to determine agreement on the magnitude of the response
+agree_magnitude <- change_wide |>
+  mutate(response_atl_g = mag_class(gfdl_Atlantis), response_ewe_g = mag_class(gfdl_EwE),
+         response_atl_i = mag_class(ipsl_Atlantis), response_ewe_i = mag_class(ipsl_EwE),
+         sign_atl_g = case_when(gfdl_Atlantis >= 0 ~ "+", gfdl_Atlantis < 0 ~ "-"), 
+         sign_ewe_g = case_when(gfdl_EwE >= 0 ~ "+", gfdl_EwE < 0 ~ "-"), 
+         sign_atl_i = case_when(ipsl_Atlantis >= 0 ~ "+", ipsl_Atlantis < 0 ~ "-"), 
+         sign_ewe_i = case_when(ipsl_EwE >= 0 ~ "+", ipsl_EwE < 0 ~ "-")) |>
+  mutate(gfdl = case_when(response_atl_g == response_ewe_g & sign_atl_g == sign_ewe_g ~ "A", .default = "D"), ipsl = case_when(response_atl_i == response_ewe_i & sign_atl_i == sign_ewe_i ~ "A", .default = "D"))
+
+write_csv(agree_magnitude, file.path(outputDir, "agreement_magnitude_full.csv"))
+
+# Estimate Table 2 percentages (share of SSP runs where Atlantis and EwE agree)
+
+table2 <- agree_magnitude |>
+  mutate(sign_gfdl = sign_atl_g == sign_ewe_g, sign_ipsl = sign_atl_i == sign_ewe_i,
+         mag_gfdl = gfdl == "A", mag_ipsl = ipsl == "A") |>
+  group_by(group) |>
+  summarise(sign_full = mean(c(sign_gfdl, sign_ipsl)) * 100, sign_gfdl = mean(sign_gfdl) * 100, sign_ipsl = mean(sign_ipsl) * 100, mag_full = mean(c(mag_gfdl, mag_ipsl)) * 100, mag_gfdl = mean(mag_gfdl) * 100, mag_ipsl = mean(mag_ipsl) * 100)
+
+write_csv(table2, file.path(tableDir, "table2_agreement.csv"))
+table2
+```
+

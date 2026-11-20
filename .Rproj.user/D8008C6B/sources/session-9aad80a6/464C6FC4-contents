@@ -1,0 +1,166 @@
+---
+title: "03 Community-level biomass indicators, Atlantis and EwE"
+author: "Kelly Ortega-Cisneros"
+output: html_document
+---
+
+Sums model functional groups into the 12 community-level indicators for each scenario and ESM. Fished runs only.
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+
+library(tidyverse)
+```
+
+```{r paths}
+# Paths relative to the project folder
+
+outBfilepath <- "outputs/processed/B"
+Bfilepath <- "data/raw/atlantis"
+Bfilepath_E <- "data/raw/ewe"
+year_EwE <- c(1978:2099)
+year_atlantis <- c(1990:2099)
+
+# Fished runs only 
+scen <- c("pi_F_gfdl", "ssp126_F_gfdl", "ssp585_F_gfdl", "pi_F_ipsl", "ssp126_F_ipsl", "ssp585_F_ipsl")
+```
+
+## EwE
+
+```{r ewe}
+# Listing biomass files
+BFileNames <- c("biomass_picontrol_fishing.csv", "biomass_ssp126_fishing.csv", "biomass_ssp585_fishing.csv", "biomass_pi_fishing_ipsl.csv", "biomass_ssp126_fishing_ipsl.csv", "biomass_ssp585_fishing_ipsl.csv")
+nfiles <- length(BFileNames)
+
+tphyto = data.frame(matrix(NA,nrow=122, ncol = nfiles)); tzoop = data.frame(matrix(NA,nrow=122, ncol = nfiles)); mesop = data.frame(matrix(NA,nrow=122, ncol = nfiles));
+ceps = data.frame(matrix(NA,nrow=122, ncol = nfiles)); SH = data.frame(matrix(NA,nrow=122, ncol = nfiles)); SB = data.frame(matrix(NA,nrow=122, ncol = nfiles));
+MB = data.frame(matrix(NA,nrow=122, ncol = nfiles)); spel = data.frame(matrix(NA,nrow=122, ncol = nfiles)); hakes = data.frame(matrix(NA,nrow=122, ncol = nfiles));
+demersals = data.frame(matrix(NA,nrow=122, ncol = nfiles)); lpel = data.frame(matrix(NA,nrow=122, ncol = nfiles)); mammals = data.frame(matrix(NA,nrow=122, ncol = nfiles))
+
+for(n in 1:nfiles) {
+  Bfile <- paste(Bfilepath_E,BFileNames[n],sep="/")
+  print(Bfile)
+  # biomass_ssp585_fishing.csv was saved with comma decimals
+  if (BFileNames[n] == "biomass_ssp585_fishing.csv") {
+    Bfilename <- read_delim(Bfile, delim = ",", locale = locale(decimal_mark = ","))
+  } else {
+    Bfilename <- read_delim(Bfile, delim = ",")
+  }
+
+  # Twelve indicators estimated
+  meso_p <- Bfilename %>% select(FMN, FMM) %>% transmute(b = rowSums(., na.rm = TRUE))
+  cep <- Bfilename %>% select(CEP, CS) %>% transmute(b = rowSums(., na.rm = TRUE))
+  sharks <- Bfilename %>% select(SHP,SHB,SHD) %>% transmute(b = rowSums(., na.rm = TRUE))
+  birds <- Bfilename %>% select(AP, CG, CC, SB) %>% transmute(b = rowSums(., na.rm = TRUE))
+  benthos <- Bfilename %>% select(BO, BML, WRL, SRL) %>% transmute(b = rowSums(., na.rm = TRUE))
+  tp <- Bfilename %>% select(PS,PL) %>% transmute(b = rowSums(., na.rm = TRUE))
+  tz <- Bfilename %>% select(ZS, ZM,ZL) %>% transmute(b = rowSums(., na.rm = TRUE))
+  sp <- Bfilename %>% select(FPLr, FPLa, FPSr, FPSa, FPO, FDC, FDE) %>% transmute(b = rowSums(., na.rm = TRUE))
+  h <- Bfilename %>% select(FVTr, FVTa, FVOr, FVOa) %>% transmute(b = rowSums(., na.rm = TRUE))
+  d <- Bfilename %>% select(FDP, FDB, AS, FDMr, FDMa) %>% transmute(b = rowSums(., na.rm = TRUE))
+  lp <- Bfilename %>% select(TSF, Sci, YT, OLF, LS, MS, SK) %>% transmute(b = rowSums(., na.rm = TRUE))
+  mm <- Bfilename %>% select(PIN,WHB) %>% transmute(b = rowSums(., na.rm = TRUE))
+
+  mesop[n] <- meso_p
+  ceps[n] <- cep
+  SH[n] <- sharks
+  SB[n] <- birds
+  MB[n] <- benthos
+  tphyto[n] <- tp
+  tzoop[n] <- tz
+  spel[n] <- sp
+  hakes[n] <- h
+  demersals[n] <- d
+  lpel[n] <- lp
+  mammals[n] <- mm
+}
+colnames(tphyto) <- scen; colnames(tzoop) <- scen; colnames(mesop) <- scen; colnames(ceps) <- scen; colnames(SH) <- scen; colnames(SB) <- scen; colnames(MB) <- scen; colnames(spel) <- scen; 
+colnames(hakes) <- scen; colnames(demersals) <- scen; colnames(lpel) <- scen; colnames(mammals) <- scen
+
+#### saving data (t/km2)
+write_csv(tphyto, file.path(outBfilepath, "tphyto_ewe.csv"))
+write_csv(tzoop, file.path(outBfilepath, "tzoop_ewe.csv"))
+write_csv(mesop, file.path(outBfilepath, "mesop_ewe.csv"))
+write_csv(ceps, file.path(outBfilepath, "ceps_ewe.csv"))
+write_csv(SH, file.path(outBfilepath, "SH_ewe.csv"))
+write_csv(SB, file.path(outBfilepath, "SB_ewe.csv"))
+write_csv(MB, file.path(outBfilepath, "MB_ewe.csv"))
+write_csv(spel, file.path(outBfilepath, "spel_ewe.csv"))
+write_csv(hakes, file.path(outBfilepath, "hakes_ewe.csv"))
+write_csv(demersals, file.path(outBfilepath, "demersals_ewe.csv"))
+write_csv(lpel, file.path(outBfilepath, "lpel_ewe.csv"))
+write_csv(mammals, file.path(outBfilepath, "mammals_ewe.csv"))
+```
+
+## Atlantis
+
+```{r atlantis}
+# Reading file names
+BFileNames_a <- c("outputBiomIndx_picontrol_F_gfdl.txt", "outputBiomIndx_ssp1_F_gfdl.txt", "outputBiomIndx_ssp5_F_gfdl.txt", "outputBiomIndx_picontrol_F_ipsl.txt", "outputBiomIndx_ssp1_F_ipsl.txt", "outputBiomIndx_ssp5_F_ipsl.txt")
+nfiles <- length(BFileNames_a)
+
+tphyto_a = data.frame(matrix(NA,nrow=110, ncol = nfiles)); tzoop_a = data.frame(matrix(NA,nrow=110, ncol = nfiles)); mesop_a = data.frame(matrix(NA,nrow=110, ncol = nfiles));
+ceps_a = data.frame(matrix(NA,nrow=110, ncol = nfiles)); SH_a = data.frame(matrix(NA,nrow=110, ncol = nfiles)); SB_a = data.frame(matrix(NA,nrow=110, ncol = nfiles));
+BM = data.frame(matrix(NA,nrow=110, ncol = nfiles)); spel_a = data.frame(matrix(NA,nrow=110, ncol = nfiles)); hakes_a = data.frame(matrix(NA,nrow=110, ncol = nfiles));
+dem = data.frame(matrix(NA,nrow=110, ncol = nfiles)); lpel_a = data.frame(matrix(NA,nrow=110, ncol = nfiles)); mammals_a = data.frame(matrix(NA,nrow=110, ncol = nfiles))
+
+for(n in 1:nfiles) {
+  Bfile <- paste(Bfilepath,BFileNames_a[n],sep="/")
+  print(Bfile)
+  Bfilename<-read.table(Bfile, header=TRUE)
+
+  # Twelve indicators being estimated, rows 21:130 = 1990-2099 (after the 20-year burn-in)
+  fmn <- Bfilename %>% select(FMN)  %>% slice(21:130)
+  cep_a <- Bfilename %>% select(CEP)  %>% slice(21:130)
+  shk <- Bfilename %>% select(SHP,SHB,SHD) %>% slice(21:130) %>% transmute(b = rowSums(., na.rm = TRUE))
+  b <- Bfilename %>% select(SB)  %>% slice(21:130)
+  bent <- Bfilename %>% select(BO, BML) %>% slice(21:130) %>% transmute(b = rowSums(., na.rm = TRUE))
+  tp_a <- Bfilename %>% select(PS,PL) %>% slice(21:130) %>% transmute(b = rowSums(., na.rm = TRUE))
+  tz_a <- Bfilename %>% select(ZS, ZM,ZL) %>% slice(21:130) %>% transmute(b = rowSums(., na.rm = TRUE))
+  sp_a <- Bfilename %>% select(FPL, FPS, FPO, FDE) %>% slice(21:130) %>% transmute(b = rowSums(., na.rm = TRUE))
+  h_a <- Bfilename %>% select(FVT, FVO) %>% slice(21:130) %>% transmute(b = rowSums(., na.rm = TRUE))
+  d_a <- Bfilename %>% select(FDP, FDB, FDM) %>% slice(21:130) %>% transmute(b = rowSums(., na.rm = TRUE))
+  lp_a <- Bfilename %>% select(FVV, FVS) %>% slice(21:130) %>% transmute(b = rowSums(., na.rm = TRUE))
+  mm_a <- Bfilename %>% select(PIN,WHB) %>% slice(21:130) %>% transmute(b = rowSums(., na.rm = TRUE))
+
+  mesop_a[n] <- fmn
+  ceps_a[n] <- cep_a
+  SH_a[n] <- shk
+  SB_a[n] <- b
+  BM[n] <- bent
+  tphyto_a[n] <- tp_a
+  tzoop_a[n] <- tz_a
+  spel_a[n] <- sp_a
+  hakes_a[n] <- h_a
+  dem[n] <- d_a
+  lpel_a[n] <- lp_a
+  mammals_a[n] <- mm_a
+}
+colnames(tphyto_a) <- scen; colnames(tzoop_a) <- scen; colnames(mesop_a) <- scen; colnames(ceps_a) <- scen; colnames(SH_a) <- scen; colnames(SB_a) <- scen
+colnames(BM) <- scen; colnames(spel_a) <- scen; colnames(hakes_a) <- scen; colnames(dem) <- scen; colnames(lpel_a) <- scen; colnames(mammals_a) <- scen
+
+#### saving data (tonnes)
+write_csv(tphyto_a, file.path(outBfilepath, "tphyto_atl.csv"))
+write_csv(tzoop_a, file.path(outBfilepath, "tzoop_atl.csv"))
+write_csv(mesop_a, file.path(outBfilepath, "mesop_atl.csv"))
+write_csv(ceps_a, file.path(outBfilepath, "ceps_atl.csv"))
+write_csv(SH_a, file.path(outBfilepath, "SH_atl.csv"))
+write_csv(SB_a, file.path(outBfilepath, "SB_atl.csv"))
+write_csv(BM, file.path(outBfilepath, "MB_atl.csv"))
+write_csv(spel_a, file.path(outBfilepath, "spel_atl.csv"))
+write_csv(hakes_a, file.path(outBfilepath, "hakes_atl.csv"))
+write_csv(dem, file.path(outBfilepath, "demersals_atl.csv"))
+write_csv(lpel_a, file.path(outBfilepath, "lpel_atl.csv"))
+write_csv(mammals_a, file.path(outBfilepath, "mammals_atl.csv"))
+```
+
+## Save all indicators in one file
+
+```{r save-rds}
+group_biomass <- list(
+  ewe = list(tphyto = tphyto, tzoop = tzoop, mesop = mesop, ceps = ceps, SH = SH, SB = SB,
+             MB = MB, spel = spel, hakes = hakes, demersals = demersals, lpel = lpel, mammals = mammals),
+  atl = list(tphyto = tphyto_a, tzoop = tzoop_a, mesop = mesop_a, ceps = ceps_a, SH = SH_a, SB = SB_a,
+             MB = BM, spel = spel_a, hakes = hakes_a, demersals = dem, lpel = lpel_a, mammals = mammals_a))
+saveRDS(group_biomass, file.path("outputs/processed", "group_biomass.rds"))
+```
