@@ -1,4 +1,4 @@
-# Southern Benguela MEM uncertainty analysis
+# southern Benguela MEM uncertainty analysis
 
 Workflow for Ortega-Cisneros et al., "Estimating uncertainty in climate projections of the southern Benguela marine ecosystem using a model ensemble" (submitted to Earth's Future).
 
